@@ -1,0 +1,38 @@
+name: One-time cleanup of legacy public Ovrelixa TV releases
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/prune-legacy-tv-releases.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  prune:
+    if: github.repository == 'ryajohns1-lab/Marquee-TV-update-portal'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify final public bridge and delete only older release tags
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          latest="$(gh api "repos/$repo/releases/latest" --jq '.tag_name')"
+          if [[ "$latest" != "v0.3.1-b26" ]]; then
+            echo "::error::Expected v0.3.1-b26 as final public release; found $latest. Refusing cleanup."
+            exit 1
+          fi
+          gh release view "v0.3.1-b26" --repo "$repo" --json assets --jq '.assets[].name' | grep -Fxq "ovrelixa-tv.apk"
+          gh release view "v0.3.1-b26" --repo "$repo" --json assets --jq '.assets[].name' | grep -Fxq "version.json"
+          gh api "repos/$repo/releases?per_page=100" --paginate --jq '.[].tag_name' | while IFS= read -r tag; do
+            if [[ "$tag" =~ ^v0\.[0-9]+\.[0-9]+-b([0-9]+)$ ]]; then
+              build="${BASH_REMATCH[1]}"
+              if (( build >= 12 && build < 26 )); then
+                echo "Deleting old TV release and tag: $tag"
+                gh release delete "$tag" --repo "$repo" --cleanup-tag --yes
+              fi
+            fi
+          done
+          echo "Kept final public release v0.3.1-b26. Build 27+ private-only."
